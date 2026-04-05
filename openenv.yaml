@@ -1,0 +1,100 @@
+name: corporate-ai-auditor
+version: "1.0.0"
+description: >
+  A real-world OpenEnv environment where AI agents act as corporate AI auditors.
+  Agents investigate AI systems for bias, privacy violations, security gaps,
+  transparency failures, and regulatory breaches. Three tasks of increasing
+  difficulty: bias detection (easy), privacy compliance (medium),
+  full risk audit with written report (hard).
+
+author: openenv-submission
+tags:
+  - openenv
+  - ai-auditing
+  - bias-detection
+  - privacy
+  - compliance
+  - real-world
+  - nlp
+
+tasks:
+  - id: bias_detection
+    difficulty: easy
+    description: Audit an AI hiring tool for gender bias and proxy discrimination
+    max_steps: 12
+    reward_range: [0.0, 1.0]
+
+  - id: privacy_compliance
+    difficulty: medium
+    description: Audit a hospital AI for GDPR/HIPAA privacy and security violations
+    max_steps: 16
+    reward_range: [0.0, 1.0]
+
+  - id: full_risk_audit
+    difficulty: hard
+    description: Full regulatory audit of a credit scoring AI — bias, privacy, explainability, written report
+    max_steps: 25
+    reward_range: [0.0, 1.0]
+
+observation_space:
+  type: object
+  fields:
+    task_id: string
+    task_description: string
+    ai_system:
+      type: object
+      fields:
+        system_id: string
+        name: string
+        purpose: string
+        vendor: string
+        deployment: string
+        data_sources: array
+        model_type: string
+        flags: array
+    findings: array of AuditFinding objects
+    documents: object (key=doc_name, value=content or access status)
+    step: integer
+    max_steps: integer
+    context: object
+
+action_space:
+  type: object
+  fields:
+    action_type:
+      type: string
+      enum:
+        - request_document
+        - flag_bias
+        - flag_privacy
+        - flag_security
+        - flag_transparency
+        - assess_risk
+        - write_recommendation
+        - submit_report
+    target:
+      type: string
+      description: Document name, system_id, or finding_id
+    value:
+      type: string
+      description: Finding description with evidence, severity, or recommendation text
+    reasoning:
+      type: string
+      optional: true
+
+reward:
+  type: float
+  range: [0.0, 1.0]
+  description: >
+    Partial reward per step based on marginal improvement in audit completeness.
+    Bonus +0.05 for accessing new documents.
+    Penalty -0.05 per duplicate action.
+    Final score computed by deterministic grader at episode end.
+
+endpoints:
+  reset: POST /reset?task_id={task_id}
+  step:  POST /step?task_id={task_id}
+  state: GET  /state?task_id={task_id}
+  tasks: GET  /tasks
+  health: GET /health
+  docs:  GET  /docs

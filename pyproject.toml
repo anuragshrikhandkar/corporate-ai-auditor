@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "corporate-ai-auditor"
+version = "0.1.0"
+description = "Corporate AI Auditor - Meta Hackathon Submission"
+requires-python = ">=3.8"
+dependencies = [
+    "pydantic>=2.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "gradio>=4.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["env", "inference", "app"]
+

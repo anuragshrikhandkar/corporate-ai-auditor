@@ -1,0 +1,13 @@
+pydantic
+fastapi
+uvicorn
+openenv
+
+fastapi
+uvicorn
+python-dotenv
+openai
+pydantic
+httpx
+PyYAML
+requests
