@@ -274,9 +274,10 @@ TASK_REGISTRY: Dict[str, Dict] = {
 }
 
 
+# ✅ FIX: return 1e-6 instead of 0.0 so score is never exactly 0
 def _match_finding(action: Action, spec: Dict) -> float:
     if action.action_type != spec["action"]:
-        return 0.0
+        return 1e-6  # ✅ FIXED: was 0.0
     text = (action.value + " " + (action.reasoning or "")).lower()
     hits = sum(1 for kw in spec["keywords"] if kw.lower() in text)
     return min(0.99, hits / max(2, len(spec["keywords"]) // 2))
@@ -284,7 +285,8 @@ def _match_finding(action: Action, spec: Dict) -> float:
 
 def grade_task1(actions: List[Action]) -> Tuple[float, Dict, str]:
     required = TASK1_REQUIRED_FLAGS
-    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=0.0), 4) for k, spec in required.items()}
+    # ✅ FIXED: default=1e-6 instead of default=0.0
+    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=1e-6), 4) for k, spec in required.items()}
     total = sum(scores.values()) / len(required)
     total = max(0.01, min(0.99, round(total, 4)))
     found = sum(1 for v in scores.values() if v >= 0.5)
@@ -293,7 +295,8 @@ def grade_task1(actions: List[Action]) -> Tuple[float, Dict, str]:
 
 def grade_task2(actions: List[Action]) -> Tuple[float, Dict, str]:
     required = TASK2_REQUIRED_FLAGS
-    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=0.0), 4) for k, spec in required.items()}
+    # ✅ FIXED: default=1e-6 instead of default=0.0
+    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=1e-6), 4) for k, spec in required.items()}
     total = sum(scores.values()) / len(required)
     total = max(0.01, min(0.99, round(total, 4)))
     found = sum(1 for v in scores.values() if v >= 0.5)
@@ -305,9 +308,11 @@ def grade_task3(actions: List[Action]) -> Tuple[float, Dict, str]:
     scores: Dict[str, float] = {}
     for flag_name in ["disparate_impact", "explainability", "unlawful_data", "regulatory_breach"]:
         spec = required[flag_name]
-        scores[flag_name] = round(max((_match_finding(a, spec) for a in actions), default=0.0), 4)
+        # ✅ FIXED: default=1e-6 instead of default=0.0
+        scores[flag_name] = round(max((_match_finding(a, spec) for a in actions), default=1e-6), 4)
     risk_actions = [a for a in actions if a.action_type == "assess_risk"]
-    scores["risk_assessment"] = round(max((_match_finding(a, required["risk_assessment"]) for a in risk_actions), default=0.0), 4) if risk_actions else 0.01
+    # ✅ FIXED: default=1e-6 instead of default=0.0
+    scores["risk_assessment"] = round(max((_match_finding(a, required["risk_assessment"]) for a in risk_actions), default=1e-6), 4) if risk_actions else 0.01
     report_actions = [a for a in actions if a.action_type == "write_recommendation"]
     if report_actions:
         best_r = max((_match_finding(a, required["written_report"]) for a in report_actions))
