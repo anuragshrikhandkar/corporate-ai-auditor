@@ -72,7 +72,7 @@ class StepResult(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════
-# TASKS  (AI system fixtures + documents + graders)
+# TASKS
 # ══════════════════════════════════════════════════════════════
 
 SYSTEM_TASK1 = AISystem(
@@ -204,25 +204,25 @@ DOCS_TASK3 = {
 }
 
 TASK1_REQUIRED_FLAGS = {
-    "gender_bias":          {"action": "flag_bias",     "keywords": ["gender", "female", "male", "disparate", "0.71", "name"]},
-    "proxy_discrimination": {"action": "flag_bias",     "keywords": ["zip", "proxy", "university", "prestige", "socioeconomic"]},
-    "historical_bias":      {"action": "flag_bias",     "keywords": ["historical", "training", "label", "past", "2015"]},
+    "gender_bias":          {"action": "flag_bias", "keywords": ["gender", "female", "male", "disparate", "0.71", "name"]},
+    "proxy_discrimination": {"action": "flag_bias", "keywords": ["zip", "proxy", "university", "prestige", "socioeconomic"]},
+    "historical_bias":      {"action": "flag_bias", "keywords": ["historical", "training", "label", "past", "2015"]},
 }
 
 TASK2_REQUIRED_FLAGS = {
-    "gdpr_consent":  {"action": "flag_privacy",   "keywords": ["consent", "gdpr", "opt-out", "processing", "2019"]},
-    "data_sharing":  {"action": "flag_privacy",   "keywords": ["sharing", "pharma", "third", "university", "disclosure"]},
-    "security_gaps": {"action": "flag_security",  "keywords": ["encrypt", "s3", "unencrypted", "critical", "penetration"]},
-    "retention":     {"action": "flag_privacy",   "keywords": ["retention", "indefinite", "minimization", "delete"]},
+    "gdpr_consent":  {"action": "flag_privacy",  "keywords": ["consent", "gdpr", "opt-out", "processing", "2019"]},
+    "data_sharing":  {"action": "flag_privacy",  "keywords": ["sharing", "pharma", "third", "university", "disclosure"]},
+    "security_gaps": {"action": "flag_security", "keywords": ["encrypt", "s3", "unencrypted", "critical", "penetration"]},
+    "retention":     {"action": "flag_privacy",  "keywords": ["retention", "indefinite", "minimization", "delete"]},
 }
 
 TASK3_REQUIRED_FLAGS = {
-    "disparate_impact":  {"action": "flag_bias",         "keywords": ["disparate", "0.56", "38", "0.80", "ecoa", "hispanic", "black"]},
-    "explainability":    {"action": "flag_transparency", "keywords": ["explainab", "black box", "reason code", "post-hoc", "interpret"]},
-    "unlawful_data":     {"action": "flag_privacy",      "keywords": ["social network", "location", "gps", "broker", "consent", "device"]},
-    "regulatory_breach": {"action": "flag_bias",         "keywords": ["cfpb", "ecoa", "ag", "regulat", "legal", "complaint"]},
-    "risk_assessment":   {"action": "assess_risk",       "keywords": ["critical", "high", "500m", "2b", "fine", "discriminat"]},
-    "written_report":    {"action": "write_recommendation", "keywords": ["remediat", "suspend", "audit", "regulat", "immediate", "halt"]},
+    "disparate_impact":  {"action": "flag_bias",             "keywords": ["disparate", "0.56", "38", "0.80", "ecoa", "hispanic", "black"]},
+    "explainability":    {"action": "flag_transparency",     "keywords": ["explainab", "black box", "reason code", "post-hoc", "interpret"]},
+    "unlawful_data":     {"action": "flag_privacy",          "keywords": ["social network", "location", "gps", "broker", "consent", "device"]},
+    "regulatory_breach": {"action": "flag_bias",             "keywords": ["cfpb", "ecoa", "ag", "regulat", "legal", "complaint"]},
+    "risk_assessment":   {"action": "assess_risk",           "keywords": ["critical", "high", "500m", "2b", "fine", "discriminat"]},
+    "written_report":    {"action": "write_recommendation",  "keywords": ["remediat", "suspend", "audit", "regulat", "immediate", "halt"]},
 }
 
 TASK_REGISTRY: Dict[str, Dict] = {
@@ -279,23 +279,25 @@ def _match_finding(action: Action, spec: Dict) -> float:
         return 0.0
     text = (action.value + " " + (action.reasoning or "")).lower()
     hits = sum(1 for kw in spec["keywords"] if kw.lower() in text)
-    return min(1.0, hits / max(2, len(spec["keywords"]) // 2))
+    return min(0.99, hits / max(2, len(spec["keywords"]) // 2))
 
 
 def grade_task1(actions: List[Action]) -> Tuple[float, Dict, str]:
     required = TASK1_REQUIRED_FLAGS
-    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=0.0), 2) for k, spec in required.items()}
+    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=0.0), 4) for k, spec in required.items()}
     total = sum(scores.values()) / len(required)
+    total = max(0.01, min(0.99, round(total, 4)))
     found = sum(1 for v in scores.values() if v >= 0.5)
-    return round(total, 2), scores, f"{found}/{len(required)} bias issues correctly identified."
+    return total, scores, f"{found}/{len(required)} bias issues correctly identified."
 
 
 def grade_task2(actions: List[Action]) -> Tuple[float, Dict, str]:
     required = TASK2_REQUIRED_FLAGS
-    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=0.0), 2) for k, spec in required.items()}
+    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=0.0), 4) for k, spec in required.items()}
     total = sum(scores.values()) / len(required)
+    total = max(0.01, min(0.99, round(total, 4)))
     found = sum(1 for v in scores.values() if v >= 0.5)
-    return round(total, 2), scores, f"{found}/{len(required)} privacy/security issues identified."
+    return total, scores, f"{found}/{len(required)} privacy/security issues identified."
 
 
 def grade_task3(actions: List[Action]) -> Tuple[float, Dict, str]:
@@ -303,25 +305,26 @@ def grade_task3(actions: List[Action]) -> Tuple[float, Dict, str]:
     scores: Dict[str, float] = {}
     for flag_name in ["disparate_impact", "explainability", "unlawful_data", "regulatory_breach"]:
         spec = required[flag_name]
-        scores[flag_name] = round(max((_match_finding(a, spec) for a in actions), default=0.0), 2)
+        scores[flag_name] = round(max((_match_finding(a, spec) for a in actions), default=0.0), 4)
     risk_actions = [a for a in actions if a.action_type == "assess_risk"]
-    scores["risk_assessment"] = round(max((_match_finding(a, required["risk_assessment"]) for a in risk_actions), default=0.0), 2) if risk_actions else 0.0
+    scores["risk_assessment"] = round(max((_match_finding(a, required["risk_assessment"]) for a in risk_actions), default=0.0), 4) if risk_actions else 0.01
     report_actions = [a for a in actions if a.action_type == "write_recommendation"]
     if report_actions:
         best_r = max((_match_finding(a, required["written_report"]) for a in report_actions))
-        length_bonus = min(0.3, len(max(report_actions, key=lambda a: len(a.value)).value) / 300)
-        scores["written_report"] = round(min(1.0, best_r + length_bonus), 2)
+        length_bonus = min(0.29, len(max(report_actions, key=lambda a: len(a.value)).value) / 300)
+        scores["written_report"] = round(min(0.99, best_r + length_bonus), 4)
     else:
-        scores["written_report"] = 0.0
+        scores["written_report"] = 0.01
     total = sum(scores.values()) / len(required)
+    total = max(0.01, min(0.99, round(total, 4)))
     found = sum(1 for v in scores.values() if v >= 0.5)
-    return round(total, 2), scores, f"{found}/{len(required)} audit components completed."
+    return total, scores, f"{found}/{len(required)} audit components completed."
 
 
 GRADERS = {
-    "bias_detection":    grade_task1,
+    "bias_detection":     grade_task1,
     "privacy_compliance": grade_task2,
-    "full_risk_audit":   grade_task3,
+    "full_risk_audit":    grade_task3,
 }
 
 
@@ -362,15 +365,12 @@ class AIAuditorEnv:
             raise RuntimeError("Episode is done. Call reset() to start a new episode.")
         if self._current_obs is None:
             raise RuntimeError("Call reset() before step().")
-
         self._step_count += 1
         self._actions_taken.append(action)
         self._apply_action(action)
         step_reward = self._compute_step_reward(action)
-
         submitted_report = action.action_type == "submit_report"
         self._done = self._step_count >= self._cfg["max_steps"] or submitted_report
-
         if self._done:
             self._status = "done"
             grader = GRADERS[self.task_id]
@@ -383,7 +383,6 @@ class AIAuditorEnv:
             }
         else:
             info = {"episode_id": self._episode_id, "steps": self._step_count}
-
         self._action_history.append({
             "timestamp": datetime.utcnow().isoformat(),
             "step": self._step_count,
@@ -446,7 +445,7 @@ class AIAuditorEnv:
         grader = GRADERS[self.task_id]
         score_now, _, _ = grader(self._actions_taken)
         prev = self._actions_taken[:-1]
-        score_prev, _, _ = grader(prev) if prev else (0.0, {}, "")
+        score_prev, _, _ = grader(prev) if prev else (0.01, {}, "")
         delta = score_now - score_prev
         doc_bonus = 0.05 if (
             action.action_type == "request_document"
@@ -458,4 +457,4 @@ class AIAuditorEnv:
             if a.action_type == action.action_type and a.target == action.target
         )
         penalty = 0.05 * duplicate_count
-        return round(max(0.0, delta + doc_bonus - penalty), 4)
+        return round(max(0.01, min(0.99, delta + doc_bonus - penalty)), 4)
