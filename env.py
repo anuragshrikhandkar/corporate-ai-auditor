@@ -217,12 +217,12 @@ TASK2_REQUIRED_FLAGS = {
 }
 
 TASK3_REQUIRED_FLAGS = {
-    "disparate_impact":  {"action": "flag_bias",             "keywords": ["disparate", "0.56", "38", "0.80", "ecoa", "hispanic", "black"]},
-    "explainability":    {"action": "flag_transparency",     "keywords": ["explainab", "black box", "reason code", "post-hoc", "interpret"]},
-    "unlawful_data":     {"action": "flag_privacy",          "keywords": ["social network", "location", "gps", "broker", "consent", "device"]},
-    "regulatory_breach": {"action": "flag_bias",             "keywords": ["cfpb", "ecoa", "ag", "regulat", "legal", "complaint"]},
-    "risk_assessment":   {"action": "assess_risk",           "keywords": ["critical", "high", "500m", "2b", "fine", "discriminat"]},
-    "written_report":    {"action": "write_recommendation",  "keywords": ["remediat", "suspend", "audit", "regulat", "immediate", "halt"]},
+    "disparate_impact":  {"action": "flag_bias",            "keywords": ["disparate", "0.56", "38", "0.80", "ecoa", "hispanic", "black"]},
+    "explainability":    {"action": "flag_transparency",    "keywords": ["explainab", "black box", "reason code", "post-hoc", "interpret"]},
+    "unlawful_data":     {"action": "flag_privacy",         "keywords": ["social network", "location", "gps", "broker", "consent", "device"]},
+    "regulatory_breach": {"action": "flag_bias",            "keywords": ["cfpb", "ecoa", "ag", "regulat", "legal", "complaint"]},
+    "risk_assessment":   {"action": "assess_risk",          "keywords": ["critical", "high", "500m", "2b", "fine", "discriminat"]},
+    "written_report":    {"action": "write_recommendation", "keywords": ["remediat", "suspend", "audit", "regulat", "immediate", "halt"]},
 }
 
 TASK_REGISTRY: Dict[str, Dict] = {
@@ -274,19 +274,21 @@ TASK_REGISTRY: Dict[str, Dict] = {
 }
 
 
-# ✅ FIX: return 1e-6 instead of 0.0 so score is never exactly 0
 def _match_finding(action: Action, spec: Dict) -> float:
     if action.action_type != spec["action"]:
-        return 1e-6  # ✅ FIXED: was 0.0
+        return 0.001
     text = (action.value + " " + (action.reasoning or "")).lower()
     hits = sum(1 for kw in spec["keywords"] if kw.lower() in text)
-    return min(0.99, hits / max(2, len(spec["keywords"]) // 2))
+    raw = hits / max(2, len(spec["keywords"]) // 2)
+    return max(0.001, min(0.99, raw))
 
 
 def grade_task1(actions: List[Action]) -> Tuple[float, Dict, str]:
     required = TASK1_REQUIRED_FLAGS
-    # ✅ FIXED: default=1e-6 instead of default=0.0
-    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=1e-6), 4) for k, spec in required.items()}
+    scores = {
+        k: round(max((_match_finding(a, spec) for a in actions), default=0.001), 4)
+        for k, spec in required.items()
+    }
     total = sum(scores.values()) / len(required)
     total = max(0.01, min(0.99, round(total, 4)))
     found = sum(1 for v in scores.values() if v >= 0.5)
@@ -295,8 +297,10 @@ def grade_task1(actions: List[Action]) -> Tuple[float, Dict, str]:
 
 def grade_task2(actions: List[Action]) -> Tuple[float, Dict, str]:
     required = TASK2_REQUIRED_FLAGS
-    # ✅ FIXED: default=1e-6 instead of default=0.0
-    scores = {k: round(max((_match_finding(a, spec) for a in actions), default=1e-6), 4) for k, spec in required.items()}
+    scores = {
+        k: round(max((_match_finding(a, spec) for a in actions), default=0.001), 4)
+        for k, spec in required.items()
+    }
     total = sum(scores.values()) / len(required)
     total = max(0.01, min(0.99, round(total, 4)))
     found = sum(1 for v in scores.values() if v >= 0.5)
@@ -308,11 +312,13 @@ def grade_task3(actions: List[Action]) -> Tuple[float, Dict, str]:
     scores: Dict[str, float] = {}
     for flag_name in ["disparate_impact", "explainability", "unlawful_data", "regulatory_breach"]:
         spec = required[flag_name]
-        # ✅ FIXED: default=1e-6 instead of default=0.0
-        scores[flag_name] = round(max((_match_finding(a, spec) for a in actions), default=1e-6), 4)
+        scores[flag_name] = round(
+            max((_match_finding(a, spec) for a in actions), default=0.001), 4
+        )
     risk_actions = [a for a in actions if a.action_type == "assess_risk"]
-    # ✅ FIXED: default=1e-6 instead of default=0.0
-    scores["risk_assessment"] = round(max((_match_finding(a, required["risk_assessment"]) for a in risk_actions), default=1e-6), 4) if risk_actions else 0.01
+    scores["risk_assessment"] = round(
+        max((_match_finding(a, required["risk_assessment"]) for a in risk_actions), default=0.001), 4
+    ) if risk_actions else 0.01
     report_actions = [a for a in actions if a.action_type == "write_recommendation"]
     if report_actions:
         best_r = max((_match_finding(a, required["written_report"]) for a in report_actions))
@@ -450,7 +456,7 @@ class AIAuditorEnv:
         grader = GRADERS[self.task_id]
         score_now, _, _ = grader(self._actions_taken)
         prev = self._actions_taken[:-1]
-        score_prev, _, _ = grader(prev) if prev else (0.01, {}, "")
+        score_prev = grader(prev)[0] if prev else 0.01
         delta = score_now - score_prev
         doc_bonus = 0.05 if (
             action.action_type == "request_document"
@@ -462,4 +468,5 @@ class AIAuditorEnv:
             if a.action_type == action.action_type and a.target == action.target
         )
         penalty = 0.05 * duplicate_count
-        return round(max(0.01, min(0.99, delta + doc_bonus - penalty)), 4)
+        raw = delta + doc_bonus - penalty + 0.01
+        return round(max(0.01, min(0.99, raw)), 4)
