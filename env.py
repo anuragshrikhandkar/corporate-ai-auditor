@@ -1,5 +1,6 @@
 """
-Corporate AI Auditor — env.py (FIXED v8 — GUARANTEED STRICT BETWEEN 0 AND 1)
+Corporate AI Auditor — env.py (FIXED v9 — with state() method for interface)
+All scores strictly between 0 and 1 (0.001 to 0.999)
 """
 
 import uuid
@@ -17,7 +18,6 @@ def safe_score(score: float) -> float:
         return MIN_SCORE
     if score >= 1:
         return MAX_SCORE
-    # Round but ensure not 0.000 or 1.000
     rounded = round(score, 6)
     if rounded <= 0:
         return MIN_SCORE
@@ -177,20 +177,14 @@ TASK_REGISTRY = {
 
 # ============ GRADING FUNCTIONS ============
 def _match_finding(action, spec):
-    """Return score strictly between 0 and 1"""
     if action.action_type != spec["action"]:
         return MIN_SCORE
-    
     text = (action.value + " " + (action.reasoning or "")).lower()
     matches = sum(1 for kw in spec["keywords"] if kw.lower() in text)
-    
     if matches == 0:
         return MIN_SCORE
-    
-    # Scale: 0.001 to 0.999 based on proportion
     proportion = matches / len(spec["keywords"])
     score = MIN_SCORE + (proportion * (MAX_SCORE - MIN_SCORE))
-    
     return safe_score(score)
 
 def _best(actions, spec):
@@ -231,6 +225,7 @@ class AIAuditorEnv:
         self._step_count = 0
         self._done = False
         self._actions_taken = []
+        self._action_history = []   # added for interface
         self._findings = []
         self._docs_accessed = []
         self._current_obs = None
@@ -241,6 +236,7 @@ class AIAuditorEnv:
         self._step_count = 0
         self._done = False
         self._actions_taken = []
+        self._action_history = []
         self._findings = []
         self._docs_accessed = []
         self._status = "running"
@@ -256,6 +252,14 @@ class AIAuditorEnv:
         self._step_count += 1
         self._actions_taken.append(action)
         self._apply_action(action)
+        
+        # Record action history
+        self._action_history.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "step": self._step_count,
+            "action": action.model_dump(),
+            "reward": 0.0,  # will be updated after reward calculation
+        })
         
         submitted = action.action_type == "submit_report"
         self._done = self._step_count >= self._cfg["max_steps"] or submitted
@@ -278,6 +282,10 @@ class AIAuditorEnv:
             reward = current_score / max(1, self._step_count)
         
         reward = safe_score(reward)
+        # Update last action's reward in history
+        if self._action_history:
+            self._action_history[-1]["reward"] = reward
+        
         self._current_obs = self._build_obs()
         
         return StepResult(
@@ -286,6 +294,19 @@ class AIAuditorEnv:
             done=self._done,
             info=info
         )
+
+    def state(self) -> Dict[str, Any]:
+        """Return current state for the interface"""
+        return {
+            "status": self._status,
+            "episode_id": self._episode_id,
+            "task_id": self.task_id,
+            "step_count": self._step_count,
+            "done": self._done,
+            "findings_logged": len(self._findings),
+            "docs_accessed": self._docs_accessed,
+            "action_history": self._action_history,
+        }
 
     def _build_obs(self) -> Observation:
         doc_index = {}
