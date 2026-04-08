@@ -1,9 +1,6 @@
-
-
-
 """
-Corporate AI Auditor — env.py  (FIXED v3 — bulletproof score clamping)
-All scores/rewards guaranteed strictly in (0.0, 1.0) exclusive.
+Corporate AI Auditor — env.py  (FIXED v4 — scores match openenv.yaml range [0.01, 0.99])
+All scores/rewards guaranteed strictly in (0.01, 0.99) — matches openenv.yaml reward_range.
 """
 
 import uuid
@@ -12,15 +9,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-_LO = 0.05
-_HI = 0.95
+# ✅ FIXED: must match openenv.yaml reward_range: [0.01, 0.99]
+_LO = 0.01
+_HI = 0.99
 
 def _clamp(v: float) -> float:
     try:
         v = float(v)
     except Exception:
         v = _LO
-    if v != v:
+    if v != v:  # NaN check
         v = _LO
     return round(max(_LO, min(_HI, v)), 4)
 
@@ -59,7 +57,7 @@ class Action(BaseModel):
         "flag_transparency, assess_risk, write_recommendation, submit_report"
     ))
     target: str = Field(description="system_id, document_name, or finding_id")
-    value: str = Field(description="Finding description with evidence, severity, or recommendation")
+    value: str = Field(description="Finding description with evidence, severity, or recommendation text")
     reasoning: Optional[str] = None
 
 class Reward(BaseModel):
@@ -196,7 +194,8 @@ TASK_REGISTRY: Dict[str, Dict] = {
 }
 
 def _match_finding(action, spec):
-    if action.action_type != spec["action"]: return 0.0
+    if action.action_type != spec["action"]:
+        return 0.0
     text = (action.value + " " + (action.reasoning or "")).lower()
     hits = sum(1 for kw in spec["keywords"] if kw.lower() in text)
     return hits / max(2, len(spec["keywords"]) // 2)
@@ -250,16 +249,21 @@ class AIAuditorEnv:
 
     def reset(self) -> Observation:
         self._episode_id = str(uuid.uuid4())
-        self._step_count = 0; self._done = False
-        self._actions_taken = []; self._action_history = []
-        self._findings = []; self._docs_accessed = []
+        self._step_count = 0
+        self._done = False
+        self._actions_taken = []
+        self._action_history = []
+        self._findings = []
+        self._docs_accessed = []
         self._status = "running"
         self._current_obs = self._build_obs()
         return self._current_obs
 
     def step(self, action: Action) -> StepResult:
-        if self._done: raise RuntimeError("Episode is done. Call reset().")
-        if self._current_obs is None: raise RuntimeError("Call reset() before step().")
+        if self._done:
+            raise RuntimeError("Episode is done. Call reset().")
+        if self._current_obs is None:
+            raise RuntimeError("Call reset() before step().")
         self._step_count += 1
         self._actions_taken.append(action)
         self._apply_action(action)
@@ -269,53 +273,84 @@ class AIAuditorEnv:
         if self._done:
             self._status = "done"
             final_score, breakdown, feedback = GRADERS[self.task_id](self._actions_taken)
-            info: Dict[str, Any] = {"final_score": final_score, "breakdown": breakdown,
+            info: Dict[str, Any] = {
+                "final_score": final_score, "breakdown": breakdown,
                 "feedback": feedback, "episode_id": self._episode_id,
                 "steps": self._step_count, "docs_accessed": self._docs_accessed,
-                "findings_count": len(self._findings)}
+                "findings_count": len(self._findings),
+            }
         else:
             info = {"episode_id": self._episode_id, "steps": self._step_count}
-        self._action_history.append({"timestamp": datetime.utcnow().isoformat(),
-            "step": self._step_count, "action": action.model_dump(), "reward": step_reward})
+        self._action_history.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "step": self._step_count,
+            "action": action.model_dump(),
+            "reward": step_reward,
+        })
         self._current_obs = self._build_obs()
         return StepResult(observation=self._current_obs, reward=step_reward, done=self._done, info=info)
 
     def state(self) -> Dict[str, Any]:
-        return {"status": self._status, "episode_id": self._episode_id,
-            "task_id": self.task_id, "step_count": self._step_count, "done": self._done,
-            "findings_logged": len(self._findings), "docs_accessed": self._docs_accessed,
-            "action_history": self._action_history}
+        return {
+            "status": self._status, "episode_id": self._episode_id,
+            "task_id": self.task_id, "step_count": self._step_count,
+            "done": self._done, "findings_logged": len(self._findings),
+            "docs_accessed": self._docs_accessed, "action_history": self._action_history,
+        }
 
     def _build_obs(self) -> Observation:
-        doc_index = {k: ("[ACCESSED] " + v if k in self._docs_accessed else "[NOT YET ACCESSED — use request_document]")
-            for k, v in self._cfg["documents"].items()}
-        return Observation(task_id=self.task_id, task_description=self._cfg["description"],
-            ai_system=self._cfg["ai_system"], findings=list(self._findings), documents=doc_index,
-            step=self._step_count, max_steps=self._cfg["max_steps"],
-            context={"episode_id": self._episode_id, "docs_available": list(self._cfg["documents"].keys()),
-                     "docs_accessed": self._docs_accessed, "findings_count": len(self._findings)})
+        doc_index = {
+            k: ("[ACCESSED] " + v if k in self._docs_accessed else "[NOT YET ACCESSED — use request_document]")
+            for k, v in self._cfg["documents"].items()
+        }
+        return Observation(
+            task_id=self.task_id,
+            task_description=self._cfg["description"],
+            ai_system=self._cfg["ai_system"],
+            findings=list(self._findings),
+            documents=doc_index,
+            step=self._step_count,
+            max_steps=self._cfg["max_steps"],
+            context={
+                "episode_id": self._episode_id,
+                "docs_available": list(self._cfg["documents"].keys()),
+                "docs_accessed": self._docs_accessed,
+                "findings_count": len(self._findings),
+            },
+        )
 
     def _apply_action(self, action: Action):
         if action.action_type == "request_document":
             if action.target in self._cfg["documents"] and action.target not in self._docs_accessed:
                 self._docs_accessed.append(action.target)
-        elif action.action_type in ("flag_bias","flag_privacy","flag_security",
-                                    "flag_transparency","assess_risk","write_recommendation"):
-            sev = {"flag_bias":"high","flag_privacy":"high","flag_security":"critical",
-                   "flag_transparency":"medium","assess_risk":"info","write_recommendation":"info"}
-            self._findings.append(AuditFinding(finding_id=f"F{len(self._findings)+1:03d}",
-                category=action.action_type.replace("flag_","").replace("_"," "),
-                severity=sev.get(action.action_type,"medium"),
-                description=action.value, evidence=action.reasoning or "", status="open"))
+        elif action.action_type in ("flag_bias", "flag_privacy", "flag_security",
+                                    "flag_transparency", "assess_risk", "write_recommendation"):
+            sev = {
+                "flag_bias": "high", "flag_privacy": "high",
+                "flag_security": "critical", "flag_transparency": "medium",
+                "assess_risk": "info", "write_recommendation": "info",
+            }
+            self._findings.append(AuditFinding(
+                finding_id=f"F{len(self._findings)+1:03d}",
+                category=action.action_type.replace("flag_", "").replace("_", " "),
+                severity=sev.get(action.action_type, "medium"),
+                description=action.value,
+                evidence=action.reasoning or "",
+                status="open",
+            ))
 
     def _compute_step_reward(self, action: Action) -> float:
         score_now, _, _ = GRADERS[self.task_id](self._actions_taken)
         prev = self._actions_taken[:-1]
         score_prev = GRADERS[self.task_id](prev)[0] if prev else _clamp(0.0)
         delta = score_now - score_prev
-        doc_bonus = 0.05 if (action.action_type == "request_document"
+        doc_bonus = 0.05 if (
+            action.action_type == "request_document"
             and action.target in self._cfg["documents"]
-            and action.target not in self._docs_accessed[:-1]) else 0.0
-        penalty = 0.05 * sum(1 for a in self._actions_taken[:-1]
-            if a.action_type == action.action_type and a.target == action.target)
+            and action.target not in self._docs_accessed[:-1]
+        ) else 0.0
+        penalty = 0.05 * sum(
+            1 for a in self._actions_taken[:-1]
+            if a.action_type == action.action_type and a.target == action.target
+        )
         return _clamp(delta + doc_bonus - penalty)
