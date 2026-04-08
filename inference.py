@@ -3,12 +3,10 @@
 inference.py — Corporate AI Auditor Baseline
 =============================================
 Runs an LLM agent against all 3 audit tasks.
-
 Required env vars:
     HF_TOKEN      — API key
     API_BASE_URL  — LLM endpoint (default: HuggingFace router)
     MODEL_NAME    — model (default: Qwen/Qwen2.5-72B-Instruct)
-
 Stdout format:
     [START] task=<n> env=ai-auditor model=<model>
     [STEP]  step=<n> action=<str> reward=<0.00> done=<bool> error=<null|msg>
@@ -39,7 +37,6 @@ SYSTEM_PROMPT = """You are an expert AI ethics auditor. You audit corporate AI s
 - Security gaps (encryption, access controls, penetration testing)
 - Transparency failures (explainability, reason codes, black-box models)
 - Regulatory breaches (ECOA, CFPB, GDPR, CCPA)
-
 You are methodical: first request and read documents, then flag issues with evidence.
 Always cite specific numbers, percentages, or facts from the documents in your findings."""
 
@@ -65,23 +62,18 @@ def build_prompt(obs: dict, history: list) -> str:
         )
 
     return f"""TASK: {obs['task_description']}
-
 AI SYSTEM UNDER AUDIT:
   Name: {sys['name']}
   Purpose: {sys['purpose']}
   Deployment: {sys['deployment']}
   Data sources: {', '.join(sys['data_sources'])}
   Risk flags: {', '.join(sys['flags'])}
-
 DOCUMENTS (use request_document to access unread ones):
 {docs_summary}
-
 FINDINGS LOGGED SO FAR:
 {findings_summary}
-
 STEP: {obs['step']}/{obs['max_steps']}
 {history_summary}
-
 Respond with ONLY a JSON object (no markdown, no explanation):
 {{
   "action_type": "<request_document|flag_bias|flag_privacy|flag_security|flag_transparency|assess_risk|write_recommendation|submit_report>",
@@ -89,7 +81,6 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   "value": "<specific finding with evidence, numbers, regulation names>",
   "reasoning": "<cite exact evidence from documents>"
 }}
-
 Priority: request unread documents first, then flag specific issues with evidence."""
 
 
