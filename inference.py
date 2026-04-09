@@ -1,4 +1,3 @@
-
 """
 inference.py — Corporate AI Auditor Baseline
 =============================================
@@ -156,12 +155,13 @@ def run_task(task_id: str) -> dict:
             flush=True,
         )
 
-    final_score = 0.05
+    # ✅ FIXED: changed from 0.05/0.95 to 0.01/0.99
+    final_score = 0.01
     if result and result.info.get("final_score") is not None:
-        final_score = max(0.05, min(0.95, float(result.info["final_score"])))
+        final_score = max(0.01, min(0.99, float(result.info["final_score"])))
     elif rewards:
         raw_fs = sum(rewards) / max(len(rewards), 1)
-        final_score = max(0.05, min(0.95, float(raw_fs)))
+        final_score = max(0.01, min(0.99, float(raw_fs)))
 
     success = final_score >= SUCCESS_THRESHOLD
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
