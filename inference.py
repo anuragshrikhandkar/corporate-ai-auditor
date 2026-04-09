@@ -1,15 +1,17 @@
 """
-inference.py — Corporate AI Auditor Baseline
-=============================================
+inference.py — Corporate AI Auditor Baseline (FINAL FIX)
+=========================================================
 Runs an LLM agent against all 3 audit tasks.
+
 Required env vars:
     HF_TOKEN      — API key
     API_BASE_URL  — LLM endpoint (default: HuggingFace router)
     MODEL_NAME    — model (default: Qwen/Qwen2.5-72B-Instruct)
+
 Stdout format:
     [START] task=<n> env=ai-auditor model=<model>
-    [STEP]  step=<n> action=<str> reward=<0.00> done=<bool> error=<null|msg>
-    [END]   success=<bool> steps=<n> rewards=<r1,r2,...>
+    [STEP]  step=<n> action=<str> reward=<0.0000> done=<bool> error=<null|msg>
+    [END]   success=<bool> steps=<n> final_score=<0.0000> rewards=<r1,r2,...>
 """
 
 import json
@@ -28,6 +30,24 @@ TEMPERATURE       = 0.2
 MAX_TOKENS        = 400
 SUCCESS_THRESHOLD = 0.5
 
+# ✅ Scores strictly between 0 and 1 — never 0.0 or 1.0
+_LO = 0.01
+_HI = 0.99
+
+def _clamp(v):
+    """Guarantee score is strictly in (0, 1)."""
+    try:
+        v = float(v)
+    except Exception:
+        return _LO
+    if v != v:  # NaN
+        return _LO
+    if v <= 0.0 or v < _LO:
+        return _LO
+    if v >= 1.0 or v > _HI:
+        return _HI
+    return round(v, 4)
+
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 SYSTEM_PROMPT = """You are an expert AI ethics auditor. You audit corporate AI systems for:
@@ -36,6 +56,7 @@ SYSTEM_PROMPT = """You are an expert AI ethics auditor. You audit corporate AI s
 - Security gaps (encryption, access controls, penetration testing)
 - Transparency failures (explainability, reason codes, black-box models)
 - Regulatory breaches (ECOA, CFPB, GDPR, CCPA)
+
 You are methodical: first request and read documents, then flag issues with evidence.
 Always cite specific numbers, percentages, or facts from the documents in your findings."""
 
@@ -56,23 +77,28 @@ def build_prompt(obs: dict, history: list) -> str:
     history_summary = ""
     if history:
         history_summary = "\nRecent actions:\n" + "\n".join(
-            f"  step={h['step']} {h['action_type']}({h['target']}) → reward={h['reward']:.2f}"
+            f"  step={h['step']} {h['action_type']}({h['target']}) reward={h['reward']:.4f}"
             for h in history[-5:]
         )
 
     return f"""TASK: {obs['task_description']}
+
 AI SYSTEM UNDER AUDIT:
   Name: {sys['name']}
   Purpose: {sys['purpose']}
   Deployment: {sys['deployment']}
   Data sources: {', '.join(sys['data_sources'])}
   Risk flags: {', '.join(sys['flags'])}
+
 DOCUMENTS (use request_document to access unread ones):
 {docs_summary}
+
 FINDINGS LOGGED SO FAR:
 {findings_summary}
+
 STEP: {obs['step']}/{obs['max_steps']}
 {history_summary}
+
 Respond with ONLY a JSON object (no markdown, no explanation):
 {{
   "action_type": "<request_document|flag_bias|flag_privacy|flag_security|flag_transparency|assess_risk|write_recommendation|submit_report>",
@@ -80,6 +106,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   "value": "<specific finding with evidence, numbers, regulation names>",
   "reasoning": "<cite exact evidence from documents>"
 }}
+
 Priority: request unread documents first, then flag specific issues with evidence."""
 
 
@@ -131,14 +158,20 @@ def run_task(task_id: str) -> dict:
                 action = Action(action_type="request_document", target=unread[0], value="read")
                 action_str = f"request_document('{unread[0]}')[fallback]"
             else:
-                action = Action(action_type="flag_bias", target=obs_dict["ai_system"]["system_id"], value="potential bias detected")
+                action = Action(
+                    action_type="flag_bias",
+                    target=obs_dict["ai_system"]["system_id"],
+                    value="potential bias detected in historical training data"
+                )
                 action_str = "flag_bias(fallback)"
 
         result = env.step(action)
         step += 1
         obs = result.observation
         done = result.done
-        reward = result.reward
+
+        # ✅ Always clamp step reward
+        reward = _clamp(result.reward)
         rewards.append(reward)
 
         history.append({
@@ -149,23 +182,36 @@ def run_task(task_id: str) -> dict:
         })
 
         error_str = last_error if last_error else "null"
+        # ✅ Use 4 decimal places so 0.01 never rounds to 0.00
         print(
             f"[STEP] step={step} action={action_str} "
-            f"reward={reward:.2f} done={str(done).lower()} error={error_str}",
+            f"reward={reward:.4f} done={str(done).lower()} error={error_str}",
             flush=True,
         )
 
-    # ✅ FIXED: changed from 0.05/0.95 to 0.01/0.99
-    final_score = 0.01
+    # ✅ Always produce a valid final_score strictly in (0, 1)
     if result and result.info.get("final_score") is not None:
-        final_score = max(0.01, min(0.99, float(result.info["final_score"])))
+        final_score = _clamp(result.info["final_score"])
     elif rewards:
-        raw_fs = sum(rewards) / max(len(rewards), 1)
-        final_score = max(0.01, min(0.99, float(raw_fs)))
+        final_score = _clamp(sum(rewards) / max(len(rewards), 1))
+    else:
+        # ✅ FIXED: if 0 steps ran (API failure), still emit valid score
+        final_score = _LO
 
     success = final_score >= SUCCESS_THRESHOLD
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={step} rewards={rewards_str}", flush=True)
+
+    # ✅ FIXED: always at least one reward in list; never empty rewards=
+    if not rewards:
+        rewards = [_LO]
+
+    rewards_str = ",".join(f"{r:.4f}" for r in rewards)
+
+    # ✅ FIXED: print final_score explicitly so validator can read it
+    print(
+        f"[END] success={str(success).lower()} steps={step} "
+        f"final_score={final_score:.4f} rewards={rewards_str}",
+        flush=True,
+    )
 
     return {"task_id": task_id, "success": success, "final_score": final_score, "steps": step}
 
@@ -187,4 +233,4 @@ if __name__ == "__main__":
     print("=" * 60)
     for r in results:
         status = "PASS" if r["success"] else "FAIL"
-        print(f"[{status}] {r['task_id']:<22} score={r['final_score']:.2f}  steps={r['steps']}")
+        print(f"[{status}] {r['task_id']:<22} score={r['final_score']:.4f}  steps={r['steps']}")
