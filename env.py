@@ -1,5 +1,5 @@
 """
-Corporate AI Auditor — env.py (ULTRA SAFE)
+Corporate AI Auditor — env.py (COMPLETE - Ultra Safe)
 All scores and rewards strictly between 0 and 1, exactly in [0.01, 0.99]
 """
 
@@ -24,17 +24,56 @@ def safe_score(value: float) -> float:
         d = MIN_SCORE
     elif d > MAX_SCORE:
         d = MAX_SCORE
-    # Round to 6 decimal places to avoid floating point noise
     d = d.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
-    # Final safety
     if d <= 0:
         d = MIN_SCORE
     if d >= 1:
         d = MAX_SCORE
     return float(d)
 
-# ============ Same AISystem, AuditFinding, Observation, Action, StepResult ============
-# (keep exactly as before – no changes needed)
+
+# ============ PYDANTIC MODELS ============
+class AISystem(BaseModel):
+    system_id: str
+    name: str
+    purpose: str
+    vendor: str
+    deployment: str
+    data_sources: List[str]
+    model_type: str
+    last_audit: Optional[str] = None
+    flags: List[str] = []
+
+class AuditFinding(BaseModel):
+    finding_id: str
+    category: str
+    severity: str
+    description: str
+    evidence: str
+    status: str = "open"
+
+class Observation(BaseModel):
+    task_id: str
+    task_description: str
+    ai_system: AISystem
+    findings: List[AuditFinding]
+    documents: Dict[str, str]
+    step: int
+    max_steps: int
+    context: Dict[str, Any] = {}
+
+class Action(BaseModel):
+    action_type: str
+    target: str
+    value: str
+    reasoning: Optional[str] = None
+
+class StepResult(BaseModel):
+    observation: Observation
+    reward: float
+    done: bool
+    info: Dict[str, Any] = {}
+
 
 # ============ SYSTEM DEFINITIONS ============
 SYSTEM_TASK1 = AISystem(
@@ -73,6 +112,7 @@ SYSTEM_TASK3 = AISystem(
     flags=["disparate_impact", "black_box_model"],
 )
 
+
 # ============ DOCUMENTS ============
 DOCS_TASK1 = {
     "model_card": "Disparate impact ratio: 0.71. No fairness constraints.",
@@ -94,6 +134,7 @@ DOCS_TASK3 = {
     "regulatory": "CFPB inquiry, ECOA complaint.",
     "financial": "Potential fines: $500M-$2B",
 }
+
 
 # ============ REQUIRED FLAGS ============
 TASK1_REQUIRED_FLAGS = {
@@ -117,6 +158,7 @@ TASK3_REQUIRED_FLAGS = {
     "risk": {"action": "assess_risk", "keywords": ["500m", "2b"]},
     "recommendation": {"action": "write_recommendation", "keywords": ["remediate", "suspend"]},
 }
+
 
 TASK_REGISTRY = {
     "bias_detection": {
@@ -145,6 +187,7 @@ TASK_REGISTRY = {
     },
 }
 
+
 # ============ GRADING FUNCTIONS ============
 def _match_finding(action, spec):
     if action.action_type != spec["action"]:
@@ -154,7 +197,6 @@ def _match_finding(action, spec):
     if matches == 0:
         return 0.01
     proportion = matches / len(spec["keywords"])
-    # Scale from 0.01 to 0.99
     score = 0.01 + (proportion * 0.98)
     return safe_score(score)
 
@@ -184,6 +226,7 @@ GRADERS = {
     "privacy_compliance": grade_task2,
     "full_risk_audit": grade_task3,
 }
+
 
 # ============ ENVIRONMENT ============
 class AIAuditorEnv:
@@ -245,12 +288,10 @@ class AIAuditorEnv:
                 "episode_id": self._episode_id,
                 "steps": self._step_count,
             }
-            # Reward when done: use final_score directly, scaled but never <0.01
             reward = final_score
         else:
             info = {"episode_id": self._episode_id, "steps": self._step_count}
             current_score, _, _ = GRADERS[self.task_id](self._actions_taken)
-            # Reward based on progress, but guarantee min 0.01
             reward = max(0.01, min(0.99, current_score * (self._step_count / self._cfg["max_steps"])))
         
         reward = safe_score(reward)
