@@ -1,6 +1,6 @@
 """
-Corporate AI Auditor — env.py (FIXED v9 — with state() method for interface)
-All scores strictly between 0 and 1 (0.001 to 0.999)
+Corporate AI Auditor — env.py (FIXED v10 — exact reward_range [0.01, 0.99])
+All scores strictly between 0 and 1, matching openenv.yaml
 """
 
 import uuid
@@ -8,20 +8,26 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
-# CRITICAL: Never use 0.0 or 1.0 anywhere
-MIN_SCORE = 0.001
-MAX_SCORE = 0.999
+# EXACT range from openenv.yaml
+MIN_SCORE = 0.01
+MAX_SCORE = 0.99
 
 def safe_score(score: float) -> float:
-    """Ensure score is strictly between 0 and 1"""
+    """Ensure score is strictly within [MIN_SCORE, MAX_SCORE]"""
     if score <= 0:
         return MIN_SCORE
     if score >= 1:
         return MAX_SCORE
-    rounded = round(score, 6)
-    if rounded <= 0:
+    # Clamp to exact range
+    if score < MIN_SCORE:
         return MIN_SCORE
-    if rounded >= 1:
+    if score > MAX_SCORE:
+        return MAX_SCORE
+    # Round to avoid floating point issues
+    rounded = round(score, 6)
+    if rounded < MIN_SCORE:
+        return MIN_SCORE
+    if rounded > MAX_SCORE:
         return MAX_SCORE
     return rounded
 
@@ -184,6 +190,7 @@ def _match_finding(action, spec):
     if matches == 0:
         return MIN_SCORE
     proportion = matches / len(spec["keywords"])
+    # scale from MIN_SCORE to MAX_SCORE
     score = MIN_SCORE + (proportion * (MAX_SCORE - MIN_SCORE))
     return safe_score(score)
 
@@ -225,7 +232,7 @@ class AIAuditorEnv:
         self._step_count = 0
         self._done = False
         self._actions_taken = []
-        self._action_history = []   # added for interface
+        self._action_history = []
         self._findings = []
         self._docs_accessed = []
         self._current_obs = None
@@ -258,7 +265,7 @@ class AIAuditorEnv:
             "timestamp": datetime.utcnow().isoformat(),
             "step": self._step_count,
             "action": action.model_dump(),
-            "reward": 0.0,  # will be updated after reward calculation
+            "reward": 0.0,
         })
         
         submitted = action.action_type == "submit_report"
@@ -282,7 +289,6 @@ class AIAuditorEnv:
             reward = current_score / max(1, self._step_count)
         
         reward = safe_score(reward)
-        # Update last action's reward in history
         if self._action_history:
             self._action_history[-1]["reward"] = reward
         
