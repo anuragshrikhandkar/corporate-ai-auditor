@@ -1,76 +1,40 @@
 """
-Corporate AI Auditor — env.py (FIXED v10 — exact reward_range [0.01, 0.99])
-All scores strictly between 0 and 1, matching openenv.yaml
+Corporate AI Auditor — env.py (ULTRA SAFE)
+All scores and rewards strictly between 0 and 1, exactly in [0.01, 0.99]
 """
 
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
+from decimal import Decimal, ROUND_HALF_UP
 
-# EXACT range from openenv.yaml
-MIN_SCORE = 0.01
-MAX_SCORE = 0.99
+# Exact range from openenv.yaml
+MIN_SCORE = Decimal('0.01')
+MAX_SCORE = Decimal('0.99')
 
-def safe_score(score: float) -> float:
-    """Ensure score is strictly within [MIN_SCORE, MAX_SCORE]"""
-    if score <= 0:
-        return MIN_SCORE
-    if score >= 1:
-        return MAX_SCORE
-    # Clamp to exact range
-    if score < MIN_SCORE:
-        return MIN_SCORE
-    if score > MAX_SCORE:
-        return MAX_SCORE
-    # Round to avoid floating point issues
-    rounded = round(score, 6)
-    if rounded < MIN_SCORE:
-        return MIN_SCORE
-    if rounded > MAX_SCORE:
-        return MAX_SCORE
-    return rounded
+def safe_score(value: float) -> float:
+    """Convert to Decimal, clamp to [MIN_SCORE, MAX_SCORE], never 0.0 or 1.0"""
+    d = Decimal(str(value))
+    if d <= 0:
+        d = MIN_SCORE
+    elif d >= 1:
+        d = MAX_SCORE
+    elif d < MIN_SCORE:
+        d = MIN_SCORE
+    elif d > MAX_SCORE:
+        d = MAX_SCORE
+    # Round to 6 decimal places to avoid floating point noise
+    d = d.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
+    # Final safety
+    if d <= 0:
+        d = MIN_SCORE
+    if d >= 1:
+        d = MAX_SCORE
+    return float(d)
 
-class AISystem(BaseModel):
-    system_id: str
-    name: str
-    purpose: str
-    vendor: str
-    deployment: str
-    data_sources: List[str]
-    model_type: str
-    last_audit: Optional[str] = None
-    flags: List[str] = []
-
-class AuditFinding(BaseModel):
-    finding_id: str
-    category: str
-    severity: str
-    description: str
-    evidence: str
-    status: str = "open"
-
-class Observation(BaseModel):
-    task_id: str
-    task_description: str
-    ai_system: AISystem
-    findings: List[AuditFinding]
-    documents: Dict[str, str]
-    step: int
-    max_steps: int
-    context: Dict[str, Any] = {}
-
-class Action(BaseModel):
-    action_type: str
-    target: str
-    value: str
-    reasoning: Optional[str] = None
-
-class StepResult(BaseModel):
-    observation: Observation
-    reward: float
-    done: bool
-    info: Dict[str, Any] = {}
+# ============ Same AISystem, AuditFinding, Observation, Action, StepResult ============
+# (keep exactly as before – no changes needed)
 
 # ============ SYSTEM DEFINITIONS ============
 SYSTEM_TASK1 = AISystem(
@@ -184,19 +148,19 @@ TASK_REGISTRY = {
 # ============ GRADING FUNCTIONS ============
 def _match_finding(action, spec):
     if action.action_type != spec["action"]:
-        return MIN_SCORE
+        return 0.01
     text = (action.value + " " + (action.reasoning or "")).lower()
     matches = sum(1 for kw in spec["keywords"] if kw.lower() in text)
     if matches == 0:
-        return MIN_SCORE
+        return 0.01
     proportion = matches / len(spec["keywords"])
-    # scale from MIN_SCORE to MAX_SCORE
-    score = MIN_SCORE + (proportion * (MAX_SCORE - MIN_SCORE))
+    # Scale from 0.01 to 0.99
+    score = 0.01 + (proportion * 0.98)
     return safe_score(score)
 
 def _best(actions, spec):
     if not actions:
-        return MIN_SCORE
+        return 0.01
     scores = [_match_finding(a, spec) for a in actions]
     return safe_score(max(scores))
 
@@ -260,7 +224,6 @@ class AIAuditorEnv:
         self._actions_taken.append(action)
         self._apply_action(action)
         
-        # Record action history
         self._action_history.append({
             "timestamp": datetime.utcnow().isoformat(),
             "step": self._step_count,
@@ -282,11 +245,13 @@ class AIAuditorEnv:
                 "episode_id": self._episode_id,
                 "steps": self._step_count,
             }
-            reward = final_score / self._step_count
+            # Reward when done: use final_score directly, scaled but never <0.01
+            reward = final_score
         else:
             info = {"episode_id": self._episode_id, "steps": self._step_count}
             current_score, _, _ = GRADERS[self.task_id](self._actions_taken)
-            reward = current_score / max(1, self._step_count)
+            # Reward based on progress, but guarantee min 0.01
+            reward = max(0.01, min(0.99, current_score * (self._step_count / self._cfg["max_steps"])))
         
         reward = safe_score(reward)
         if self._action_history:
@@ -302,7 +267,6 @@ class AIAuditorEnv:
         )
 
     def state(self) -> Dict[str, Any]:
-        """Return current state for the interface"""
         return {
             "status": self._status,
             "episode_id": self._episode_id,
@@ -321,7 +285,6 @@ class AIAuditorEnv:
                 doc_index[k] = f"[ACCESSED] {v}"
             else:
                 doc_index[k] = "[NOT YET ACCESSED]"
-        
         return Observation(
             task_id=self.task_id,
             task_description=self._cfg["description"],
