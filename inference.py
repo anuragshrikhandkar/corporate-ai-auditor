@@ -175,8 +175,7 @@ def run_task(task_id: str) -> dict:
         rewards = [_LO]
     rewards_str = ",".join(f"{r:.4f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={step} "
-        f"final_score={final_score:.4f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={step} rewards={rewards_str}",
         flush=True,
     )
     return {"task_id": task_id, "success": success, "final_score": final_score, "steps": step}
