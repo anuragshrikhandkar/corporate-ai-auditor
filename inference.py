@@ -1,5 +1,5 @@
 """
-inference.py — Corporate AI Auditor Baseline (FINAL FIX v2)
+inference.py — Corporate AI Auditor Baseline (FINAL FIX)
 """
 
 import json
@@ -47,7 +47,6 @@ def build_prompt(obs: dict, history: list) -> str:
     sys = obs["ai_system"]
     docs = obs["documents"]
     findings = obs["findings"]
-
     docs_summary = "\n".join(
         f"  [{k}]: {v[:150]}..." if len(v) > 150 else f"  [{k}]: {v}"
         for k, v in docs.items()
@@ -62,7 +61,6 @@ def build_prompt(obs: dict, history: list) -> str:
             f"  step={h['step']} {h['action_type']}({h['target']}) reward={h['reward']:.4f}"
             for h in history[-5:]
         )
-
     return f"""TASK: {obs['task_description']}
 
 AI SYSTEM UNDER AUDIT:
@@ -90,6 +88,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 }}
 
 Priority: request unread documents first, then flag specific issues with evidence."""
+
 
 def run_task(task_id: str) -> dict:
     env = AIAuditorEnv(task_id=task_id)
@@ -136,8 +135,11 @@ def run_task(task_id: str) -> dict:
                 action = Action(action_type="request_document", target=unread[0], value="read")
                 action_str = f"request_document('{unread[0]}')[fallback]"
             else:
-                action = Action(action_type="flag_bias", target=obs_dict["ai_system"]["system_id"],
-                                value="potential bias detected in historical training data")
+                action = Action(
+                    action_type="flag_bias",
+                    target=obs_dict["ai_system"]["system_id"],
+                    value="potential bias detected in historical training data"
+                )
                 action_str = "flag_bias(fallback)"
 
         result = env.step(action)
@@ -155,7 +157,11 @@ def run_task(task_id: str) -> dict:
         })
 
         error_str = last_error if last_error else "null"
-        print(f"[STEP] step={step} action={action_str} reward={reward:.4f} done={str(done).lower()} error={error_str}", flush=True)
+        print(
+            f"[STEP] step={step} action={action_str} "
+            f"reward={reward:.4f} done={str(done).lower()} error={error_str}",
+            flush=True,
+        )
 
     if result and result.info.get("final_score") is not None:
         final_score = _clamp(result.info["final_score"])
@@ -168,8 +174,13 @@ def run_task(task_id: str) -> dict:
     if not rewards:
         rewards = [_LO]
     rewards_str = ",".join(f"{r:.4f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={step} final_score={final_score:.4f} rewards={rewards_str}", flush=True)
+    print(
+        f"[END] success={str(success).lower()} steps={step} "
+        f"final_score={final_score:.4f} rewards={rewards_str}",
+        flush=True,
+    )
     return {"task_id": task_id, "success": success, "final_score": final_score, "steps": step}
+
 
 if __name__ == "__main__":
     print("=" * 60)
