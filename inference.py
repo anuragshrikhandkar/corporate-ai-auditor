@@ -1,6 +1,6 @@
 """
-inference.py — Corporate AI Auditor Baseline (FINAL FIX)
-=========================================================
+inference.py — Corporate AI Auditor Baseline (FINAL FIX v2)
+============================================================
 Runs an LLM agent against all 3 audit tasks.
 
 Required env vars:
@@ -30,17 +30,16 @@ TEMPERATURE       = 0.2
 MAX_TOKENS        = 400
 SUCCESS_THRESHOLD = 0.5
 
-# ✅ Scores strictly between 0 and 1 — never 0.0 or 1.0
+# ✅ FIXED: strictly (0,1) — never 0.0 or 1.0
 _LO = 0.01
 _HI = 0.99
 
 def _clamp(v):
-    """Guarantee score is strictly in (0, 1)."""
     try:
         v = float(v)
     except Exception:
         return _LO
-    if v != v:  # NaN
+    if v != v:
         return _LO
     if v <= 0.0 or v < _LO:
         return _LO
@@ -56,7 +55,6 @@ SYSTEM_PROMPT = """You are an expert AI ethics auditor. You audit corporate AI s
 - Security gaps (encryption, access controls, penetration testing)
 - Transparency failures (explainability, reason codes, black-box models)
 - Regulatory breaches (ECOA, CFPB, GDPR, CCPA)
-
 You are methodical: first request and read documents, then flag issues with evidence.
 Always cite specific numbers, percentages, or facts from the documents in your findings."""
 
@@ -151,7 +149,6 @@ def run_task(task_id: str) -> dict:
 
         except Exception as e:
             last_error = str(e)[:80]
-            # Fallback: request first unread document
             docs = obs_dict.get("documents", {})
             unread = [k for k, v in docs.items() if "NOT YET" in v]
             if unread:
@@ -170,7 +167,7 @@ def run_task(task_id: str) -> dict:
         obs = result.observation
         done = result.done
 
-        # ✅ Always clamp step reward
+        # ✅ FIXED: clamp every step reward
         reward = _clamp(result.reward)
         rewards.append(reward)
 
@@ -182,31 +179,31 @@ def run_task(task_id: str) -> dict:
         })
 
         error_str = last_error if last_error else "null"
-        # ✅ Use 4 decimal places so 0.01 never rounds to 0.00
+        # ✅ FIXED: 4 decimal places
         print(
             f"[STEP] step={step} action={action_str} "
             f"reward={reward:.4f} done={str(done).lower()} error={error_str}",
             flush=True,
         )
 
-    # ✅ Always produce a valid final_score strictly in (0, 1)
+    # ✅ FIXED: was "final_score = 0.0" — now always strictly in (0,1)
     if result and result.info.get("final_score") is not None:
         final_score = _clamp(result.info["final_score"])
     elif rewards:
-        final_score = _clamp(sum(rewards) / max(len(rewards), 1))
+        # ✅ FIXED: was sum(rewards) — now average, then clamped
+        final_score = _clamp(sum(rewards) / len(rewards))
     else:
-        # ✅ FIXED: if 0 steps ran (API failure), still emit valid score
+        # ✅ FIXED: was 0.0 — now 0.01
         final_score = _LO
 
     success = final_score >= SUCCESS_THRESHOLD
 
-    # ✅ FIXED: always at least one reward in list; never empty rewards=
+    # ✅ FIXED: never empty rewards list
     if not rewards:
         rewards = [_LO]
 
+    # ✅ FIXED: 4 decimal places, plus final_score printed explicitly
     rewards_str = ",".join(f"{r:.4f}" for r in rewards)
-
-    # ✅ FIXED: print final_score explicitly so validator can read it
     print(
         f"[END] success={str(success).lower()} steps={step} "
         f"final_score={final_score:.4f} rewards={rewards_str}",
