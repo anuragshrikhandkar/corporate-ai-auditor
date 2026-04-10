@@ -1,24 +1,10 @@
 """
 inference.py — Corporate AI Auditor Baseline (FINAL FIX v2)
-============================================================
-Runs an LLM agent against all 3 audit tasks.
-
-Required env vars:
-    HF_TOKEN      — API key
-    API_BASE_URL  — LLM endpoint (default: HuggingFace router)
-    MODEL_NAME    — model (default: Qwen/Qwen2.5-72B-Instruct)
-
-Stdout format:
-    [START] task=<n> env=ai-auditor model=<model>
-    [STEP]  step=<n> action=<str> reward=<0.0000> done=<bool> error=<null|msg>
-    [END]   success=<bool> steps=<n> final_score=<0.0000> rewards=<r1,r2,...>
 """
 
 import json
 import os
-
 from openai import OpenAI
-
 from env import Action, AIAuditorEnv, TASK_REGISTRY
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -30,7 +16,6 @@ TEMPERATURE       = 0.2
 MAX_TOKENS        = 400
 SUCCESS_THRESHOLD = 0.5
 
-# ✅ FIXED: strictly (0,1) — never 0.0 or 1.0
 _LO = 0.01
 _HI = 0.99
 
@@ -57,7 +42,6 @@ SYSTEM_PROMPT = """You are an expert AI ethics auditor. You audit corporate AI s
 - Regulatory breaches (ECOA, CFPB, GDPR, CCPA)
 You are methodical: first request and read documents, then flag issues with evidence.
 Always cite specific numbers, percentages, or facts from the documents in your findings."""
-
 
 def build_prompt(obs: dict, history: list) -> str:
     sys = obs["ai_system"]
@@ -107,11 +91,9 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
 Priority: request unread documents first, then flag specific issues with evidence."""
 
-
 def run_task(task_id: str) -> dict:
     env = AIAuditorEnv(task_id=task_id)
     obs = env.reset()
-
     print(f"[START] task={task_id} env=ai-auditor model={MODEL_NAME}", flush=True)
 
     rewards = []
@@ -146,7 +128,6 @@ def run_task(task_id: str) -> dict:
             parsed = json.loads(raw)
             action = Action(**parsed)
             action_str = f"{action.action_type}('{action.target}')"
-
         except Exception as e:
             last_error = str(e)[:80]
             docs = obs_dict.get("documents", {})
@@ -155,19 +136,14 @@ def run_task(task_id: str) -> dict:
                 action = Action(action_type="request_document", target=unread[0], value="read")
                 action_str = f"request_document('{unread[0]}')[fallback]"
             else:
-                action = Action(
-                    action_type="flag_bias",
-                    target=obs_dict["ai_system"]["system_id"],
-                    value="potential bias detected in historical training data"
-                )
+                action = Action(action_type="flag_bias", target=obs_dict["ai_system"]["system_id"],
+                                value="potential bias detected in historical training data")
                 action_str = "flag_bias(fallback)"
 
         result = env.step(action)
         step += 1
         obs = result.observation
         done = result.done
-
-        # ✅ FIXED: clamp every step reward
         reward = _clamp(result.reward)
         rewards.append(reward)
 
@@ -179,52 +155,32 @@ def run_task(task_id: str) -> dict:
         })
 
         error_str = last_error if last_error else "null"
-        # ✅ FIXED: 4 decimal places
-        print(
-            f"[STEP] step={step} action={action_str} "
-            f"reward={reward:.4f} done={str(done).lower()} error={error_str}",
-            flush=True,
-        )
+        print(f"[STEP] step={step} action={action_str} reward={reward:.4f} done={str(done).lower()} error={error_str}", flush=True)
 
-    # ✅ FIXED: was "final_score = 0.0" — now always strictly in (0,1)
     if result and result.info.get("final_score") is not None:
         final_score = _clamp(result.info["final_score"])
     elif rewards:
-        # ✅ FIXED: was sum(rewards) — now average, then clamped
         final_score = _clamp(sum(rewards) / len(rewards))
     else:
-        # ✅ FIXED: was 0.0 — now 0.01
         final_score = _LO
 
     success = final_score >= SUCCESS_THRESHOLD
-
-    # ✅ FIXED: never empty rewards list
     if not rewards:
         rewards = [_LO]
-
-    # ✅ FIXED: 4 decimal places, plus final_score printed explicitly
     rewards_str = ",".join(f"{r:.4f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={step} "
-        f"final_score={final_score:.4f} rewards={rewards_str}",
-        flush=True,
-    )
-
+    print(f"[END] success={str(success).lower()} steps={step} final_score={final_score:.4f} rewards={rewards_str}", flush=True)
     return {"task_id": task_id, "success": success, "final_score": final_score, "steps": step}
-
 
 if __name__ == "__main__":
     print("=" * 60)
     print("Corporate AI Auditor — Baseline Inference")
     print("=" * 60)
     print()
-
     results = []
     for task_id in TASK_REGISTRY.keys():
         r = run_task(task_id)
         results.append(r)
         print()
-
     print("=" * 60)
     print("SUMMARY")
     print("=" * 60)
