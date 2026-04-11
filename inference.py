@@ -16,6 +16,22 @@ TEMPERATURE       = 0.2
 MAX_TOKENS        = 400
 SUCCESS_THRESHOLD = 0.5
 
+_LO = 0.01
+_HI = 0.99
+
+def _clamp(v):
+    try:
+        v = float(v)
+    except Exception:
+        return _LO
+    if v != v:
+        return _LO
+    if v <= 0.0 or v < _LO:
+        return _LO
+    if v >= 1.0 or v > _HI:
+        return _HI
+    return round(v, 4)
+
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 SYSTEM_PROMPT = """You are an expert AI ethics auditor. You audit corporate AI systems for:
@@ -78,7 +94,6 @@ Priority: request unread documents first, then flag specific issues with evidenc
 def run_task(task_id: str) -> dict:
     env = AIAuditorEnv(task_id=task_id)
     obs = env.reset()
-
     print(f"[START] task={task_id} env=ai-auditor model={MODEL_NAME}", flush=True)
 
     rewards = []
@@ -132,7 +147,7 @@ def run_task(task_id: str) -> dict:
         step += 1
         obs = result.observation
         done = result.done
-        reward = max(0.01, min(0.99, float(result.reward)))
+        reward = _clamp(result.reward)
         rewards.append(reward)
 
         history.append({
@@ -143,26 +158,32 @@ def run_task(task_id: str) -> dict:
         })
 
         error_str = last_error if last_error else "null"
-        # EXACT FORMAT — reward=0.00 (2 decimal)
         print(
             f"[STEP] step={step} action={action_str} "
             f"reward={reward:.2f} done={str(done).lower()} error={error_str}",
             flush=True,
         )
 
+    # Compute final score — strictly between 0 and 1
     if result and result.info.get("final_score") is not None:
-        final_score = max(0.01, min(0.99, float(result.info["final_score"])))
+        final_score = _clamp(result.info["final_score"])
     elif rewards:
-        final_score = max(0.01, min(0.99, sum(rewards) / len(rewards)))
+        final_score = _clamp(sum(rewards) / len(rewards))
     else:
-        final_score = 0.01
+        final_score = _LO
 
     success = final_score >= SUCCESS_THRESHOLD
     if not rewards:
-        rewards = [0.01]
-    # EXACT FORMAT — rewards=r1,r2 (2 decimal, NO extra fields)
+        rewards = [_LO]
+
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={step} rewards={rewards_str}", flush=True)
+
+    # ✅ CRITICAL FIX: score= field must be present in [END] line
+    print(
+        f"[END] success={str(success).lower()} steps={step} "
+        f"score={final_score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
 
     return {"task_id": task_id, "success": success, "final_score": final_score, "steps": step}
 
@@ -182,4 +203,4 @@ if __name__ == "__main__":
     print("=" * 60)
     for r in results:
         status = "PASS" if r["success"] else "FAIL"
-        print(f"[{status}] {r['task_id']:<22} score={r['final_score']:.2f}  steps={r['steps']}")
+        print(f"[{status}] {r['task_id']:<22} score={r['final_score']:.3f}  steps={r['steps']}")
